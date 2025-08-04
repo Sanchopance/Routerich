@@ -13,7 +13,7 @@ install_torrserver() {
     # Проверяем, установлен ли TorrServer
     if [ -f "${binary}" ]; then
         echo "TorrServer уже установлен в ${binary}."
-        echo "Для удаления используйте: $0 -s -- --remove"
+        echo "Для удаления используйте: $0 --remove"
         exit 0
     fi
 
@@ -21,7 +21,7 @@ install_torrserver() {
     mkdir -p ${dir}
 
     # Определяем архитектуру системы
-    echo "Проверяем архитектуру..."
+    echo "Определяем архитектуру системы..."
     architecture=""
     case $(uname -m) in
         x86_64) architecture="amd64" ;;
@@ -41,32 +41,6 @@ install_torrserver() {
     echo "Загружаем TorrServer для ${architecture}..."
     wget -O ${binary} ${url} || { echo "Ошибка загрузки TorrServer"; exit 1; }
     chmod +x ${binary}
-
-    # Проверяем, установлен ли UPX
-    if command -v upx > /dev/null 2>&1; then
-        echo "UPX уже установлен."
-        # Сжимаем бинарный файл с помощью UPX
-        echo "Сжимаем бинарный файл TorrServer с использованием UPX..."
-        if upx --lzma --best ${binary}; then
-            echo "Бинарный файл TorrServer успешно сжат."
-        else
-            echo "Ошибка сжатия TorrServer. Продолжаем установку без сжатия."
-        fi
-    else
-        echo "UPX не установлен. Пытаемся установить UPX..."
-        if opkg update && opkg install upx; then
-            echo "UPX успешно установлен."
-            # Сжимаем бинарный файл с помощью UPX
-            echo "Сжимаем бинарный файл TorrServer с использованием UPX..."
-            if upx --lzma --best ${binary}; then
-                echo "Бинарный файл TorrServer успешно сжат."
-            else
-                echo "Ошибка сжатия TorrServer. Продолжаем установку без сжатия."
-            fi
-        else
-            echo "Не удалось установить UPX. Продолжаем установку без сжатия."
-        fi
-    fi
 
     # Создаем скрипт init.d для управления службой
     cat << EOF > ${init_script}
@@ -91,6 +65,7 @@ EOF
     ${init_script} start
 
     echo "TorrServer успешно установлен и запущен."
+    echo "Доступен по адресу: http://ваш-ip:8090"
 }
 
 # Функция для удаления TorrServer
