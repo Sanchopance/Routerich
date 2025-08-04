@@ -13,7 +13,7 @@ install_torrserver() {
     # Проверяем, установлен ли TorrServer
     if [ -f "${binary}" ]; then
         echo "TorrServer уже установлен в ${binary}."
-        echo "Для удаления используйте: $0 -s -- --remove"
+        echo "Для удаления используйте: $0 --remove"
         exit 0
     fi
 
@@ -21,7 +21,7 @@ install_torrserver() {
     mkdir -p ${dir}
 
     # Определяем архитектуру системы
-    echo "Проверяем архитектуру..."
+    echo "Определяем архитектуру системы..."
     architecture=""
     case $(uname -m) in
         x86_64) architecture="amd64" ;;
@@ -42,42 +42,6 @@ install_torrserver() {
     wget -O ${binary} ${url} || { echo "Ошибка загрузки TorrServer"; exit 1; }
     chmod +x ${binary}
 
-    # Спрашиваем пользователя о сжатии
-    read -p "Хотите сжать TorrServer с помощью UPX (уменьшит размер файла)? [y/N] " answer
-    case ${answer} in
-        [yY][eE][sS]|[yY])
-            # Проверяем, установлен ли UPX
-            if command -v upx > /dev/null 2>&1; then
-                echo "UPX уже установлен."
-            else
-                echo "Пытаемся установить UPX..."
-                if opkg update && opkg install upx; then
-                    echo "UPX успешно установлен."
-                else
-                    echo "Не удалось установить UPX. Продолжаем без сжатия."
-                    create_init_script
-                    return
-                fi
-            fi
-            
-            # Сжимаем бинарный файл
-            echo "Сжимаем бинарный файл TorrServer с использованием UPX..."
-            if upx --lzma --best ${binary}; then
-                echo "Бинарный файл TorrServer успешно сжат."
-            else
-                echo "Ошибка сжатия TorrServer. Продолжаем без сжатия."
-            fi
-            ;;
-        *)
-            echo "Пропускаем сжатие TorrServer."
-            ;;
-    esac
-
-    create_init_script
-}
-
-# Функция для создания init скрипта
-create_init_script() {
     # Создаем скрипт init.d для управления службой
     cat << EOF > ${init_script}
 #!/bin/sh /etc/rc.common
