@@ -8,6 +8,20 @@ init_script="/etc/init.d/torrserver"
 
 echo "Проверяем наличие TorrServer..."
 
+# Функция для определения IP-адреса
+get_ip_address() {
+    # Пробуем разные методы определения IP
+    ip=$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d'/' -f1 | head -n1)
+    
+    # Если не получилось, пробуем другой метод
+    [ -z "$ip" ] && ip=$(ifconfig | grep 'inet addr:' | grep -v '127.0.0.1' | cut -d: -f2 | awk '{print $1}' | head -n1)
+    
+    # Если всё равно пусто, используем localhost
+    [ -z "$ip" ] && ip="127.0.0.1"
+    
+    echo "$ip"
+}
+
 # Функция для установки TorrServer
 install_torrserver() {
     # Проверяем, установлен ли TorrServer
@@ -64,8 +78,17 @@ EOF
     ${init_script} enable
     ${init_script} start
 
-    echo "TorrServer успешно установлен и запущен."
-    echo "Доступен по адресу: http://ваш-ip:8090"
+    # Получаем IP-адрес
+    ip_address=$(get_ip_address)
+    
+    echo ""
+    echo "============================================================"
+    echo " TorrServer успешно установлен и запущен!"
+    echo " Доступен по адресу: http://${ip_address}:8090"
+    echo " Для остановки: ${init_script} stop"
+    echo " Для удаления: $0 --remove"
+    echo "============================================================"
+    echo ""
 }
 
 # Функция для удаления TorrServer
