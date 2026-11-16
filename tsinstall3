@@ -1,0 +1,266 @@
+#!/bin/sh
+# Этот скрипт устанавливает, обновляет или удаляет TorrServer на OpenWRT.
+
+# Каталог для TorrServer
+dir="/opt/torrserver"
+binary="${dir}/torrserver"
+tmp_binary="${binary}.new"
+init_script="/etc/init.d/torrserver"
+log_dir="/tmp/log/torrserver"
+
+# --- Функция получения последней версии с GitHub ---
+get_latest_version() {
+    # Пробуем wget, если не умеет HTTPS — uclient-fetch
+    if command -v wget >/dev/null 2>&1 && wget --version 2>/dev/null | grep -qi https; then
+        latest_url=$(wget --spider --server-response --no-check-certificate \
+            "https://github.com/YouROK/TorrServer/releases/latest" 2>&1 \
+            | grep "Location:" | tail -1 | awk '{print $2}' | tr -d '\r')
+    elif command -v uclient-fetch >/dev/null 2>&1; then
+        latest_url=$(uclient-fetch -O - --no-check-certificate \
+            "https://github.com/YouROK/TorrServer/releases/latest" 2>&1 \
+            | grep -i "location:" | tail -1 | awk '{print $2}' | tr -d '\r')
+    fi
+
+    if [ -n "$latest_url" ]; then
+        version=$(echo "$latest_url" | awk -F'/tag/' '{print $2}' | tr -d '\r')
+        if [ -n "$version" ]; then
+            echo "$version"
+            return 0
+        fi
+    fi
+    echo "неизвестно"
+}
+
+# --- Функция удаления ---
+remove_torrserver() {
+    echo "Удаляем TorrServer..."
+
+    if [ -f "${init_script}" ]; then
+        echo "Останавливаем службу..."
+        ${init_script} stop 2>/dev/null
+        ${init_script} disable 2>/dev/null
+    fi
+
+    if [ -f "${binary}" ]; then
+        echo "Удаляем бинарный файл..."
+        rm -f "${binary}"
+    fi
+    rm -f "${tmp_binary}"
+
+    if [ -f "${init_script}" ]; then
+        echo "Удаляем init.d скрипт..."
+        rm -f "${init_script}"
+    fi
+
+    if [ -d "${dir}" ]; then
+        echo -n "Удалить каталог с данными ${dir}? (y/n): "
+        read answer
+        case "$answer" in
+            [Yy]*)
+                echo "Удаляем каталог с данными..."
+                rm -rf "${dir}"
+                ;;
+            *)
+                echo "Каталог ${dir} сохранен"
+                ;;
+        esac
+    fi
+
+    echo "TorrServer успешно удален."
+    exit 0
+}
+
+# --- Обработка параметров ---
+case "$1" in
+    --remove|-r)
+        remove_torrserver
+        ;;
+    --help|-h)
+        echo "Использование: $0 [опции]"
+        echo "Опции:"
+        echo "  (без опций)     Установить или обновить TorrServer"
+        echo "  --remove, -r    Удалить TorrServer"
+        echo "  --help, -h      Показать эту справку"
+        exit 0
+        ;;
+esac
+
+# --- Проверка зависимостей (HTTPS) ---
+if ! command -v wget >/dev/null 2>&1 && ! command -v uclient-fetch >/dev/null 2>&1; then
+    echo "Ошибка: не найден ни wget, ни uclient-fetch. Установите wget-ssl или uclient-fetch."
+    exit 1
+fi
+
+# Убедимся, что есть корневые сертификаты (для проверки HTTPS)
+if command -v opkg >/dev/null 2>&1; then
+    if ! opkg list-installed 2>/dev/null | grep -q "^ca-bundle"; then
+        echo "Устанавливаем ca-bundle для HTTPS..."
+        opkg update >/dev/null 2>&1
+        opkg install ca-bundle ca-certificates >/dev/null 2>&1
+    fi
+fi
+
+# --- Проверка установки ---
+if [ ! -f "${binary}" ]; then
+    echo "TorrServer не установлен."
+    echo "Начинаем установку..."
+    mkdir -p "${dir}"
+else
+    current_version=$(${binary} --version 2>/dev/null | head -n1 | sed 's/^TorrServer //')
+
+    if [ -z "$current_version" ]; then
+        echo "Не удалось определить текущую версию. Бинарник может быть повреждён."
+        echo -n "Продолжить установку заново? (y/n): "
+        read answer
+        case "$answer" in
+            [Yy]*)
+                rm -f "${binary}"
+                ;;
+            *)
+                echo "Отменено."
+                exit 1
+                ;;
+        esac
+    else
+        echo "Текущая версия TorrServer: ${current_version}"
+
+        echo "Проверяем последнюю версию на GitHub..."
+        latest_version=$(get_latest_version)
+
+        if [ "$latest_version" != "неизвестно" ]; then
+            echo "Последняя версия на GitHub: ${latest_version}"
+
+            if [ "${current_version}" = "${latest_version}" ]; then
+                echo "У вас уже установлена последняя версия."
+                echo -n "Всё равно хотите обновить? (y/n): "
+                read answer
+                case "$answer" in
+                    [Yy]*)
+                        echo "Принудительное обновление..."
+                        ;;
+                    *)
+                        echo "Обновление отменено."
+                        exit 0
+                        ;;
+                esac
+            else
+                echo "Доступна новая версия!"
+                echo -n "Хотите обновить с ${current_version} до ${latest_version}? (y/n): "
+                read answer
+                case "$answer" in
+                    [Yy]*)
+                        echo "Обновляем TorrServer..."
+                        ;;
+                    *)
+                        echo "Обновление отменено."
+                        exit 0
+                        ;;
+                esac
+            fi
+        else
+            echo "Не удалось проверить последнюю версию на GitHub."
+            echo -n "Хотите обновить вслепую? (y/n): "
+            read answer
+            case "$answer" in
+                [Yy]*)
+                    echo "Обновляем TorrServer..."
+                    ;;
+                *)
+                    echo "Обновление отменено."
+                    exit 0
+                    ;;
+            esac
+        fi
+    fi
+
+    # Останавливаем службу перед обновлением
+    if [ -f "${init_script}" ]; then
+        echo "Останавливаем службу..."
+        ${init_script} stop 2>/dev/null
+    fi
+fi
+
+# --- Определение архитектуры ---
+echo "Определяем архитектуру системы..."
+architecture=""
+case $(uname -m) in
+    x86_64) architecture="amd64" ;;
+    i*86) architecture="386" ;;
+    armv7*|armv6l) architecture="arm7" ;;
+    armv5*) architecture="arm5" ;;
+    aarch64|armv8) architecture="arm64" ;;
+    mips)
+        # Важно: на многих MIPS-роутерах uname -m даёт "mips" даже для little-endian
+        if grep -qi "little endian" /proc/cpuinfo 2>/dev/null; then
+            architecture="mipsle"
+        else
+            architecture="mips"
+        fi
+        ;;
+    mips64) architecture="mips64" ;;
+    mips64el) architecture="mips64le" ;;
+    mipsel) architecture="mipsle" ;;
+    *) echo "Архитектура не поддерживается: $(uname -m)"; exit 1 ;;
+esac
+
+echo "Архитектура: ${architecture}"
+
+# --- Загрузка во временный файл (атомарная замена) ---
+url="https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-linux-${architecture}"
+echo "Загружаем новую версию с GitHub..."
+
+download_ok=0
+if command -v wget >/dev/null 2>&1; then
+    wget -O "${tmp_binary}" "${url}" --no-check-certificate --timeout=30 && download_ok=1
+fi
+if [ "$download_ok" -ne 1 ] && command -v uclient-fetch >/dev/null 2>&1; then
+    uclient-fetch -O "${tmp_binary}" --no-check-certificate "${url}" && download_ok=1
+fi
+
+if [ "$download_ok" -ne 1 ]; then
+    echo "Ошибка загрузки TorrServer"
+    rm -f "${tmp_binary}"
+    exit 1
+fi
+
+if [ ! -s "${tmp_binary}" ]; then
+    echo "Ошибка: загруженный файл пуст"
+    rm -f "${tmp_binary}"
+    exit 1
+fi
+
+chmod +x "${tmp_binary}"
+mv "${tmp_binary}" "${binary}"
+
+echo "Новая версия успешно загружена: $(ls -lh ${binary} | awk '{print $5}')"
+
+# --- Создание/обновление init.d скрипта (всегда перезаписываем) ---
+echo "Создаем/обновляем init.d скрипт..."
+cat << EOF > ${init_script}
+#!/bin/sh /etc/rc.common
+# Скрипт запуска Torrent сервера
+
+START=95
+STOP=10
+USE_PROCD=1
+
+start_service() {
+    mkdir -p ${log_dir}
+    procd_open_instance
+    procd_set_param command ${binary} -d ${dir} -p 8090 --logpath ${log_dir}/torrserver.log
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+}
+EOF
+chmod +x "${init_script}"
+${init_script} enable
+
+# --- Запуск ---
+echo "Запускаем службу..."
+${init_script} start
+
+# --- Итог ---
+new_version=$(${binary} --version 2>/dev/null | head -n1 | sed 's/^TorrServer //')
+echo "Установлена версия: ${new_version}"
+echo "TorrServer доступен по адресу: http://ваш-ip-роутера:8090"
+echo "Готово!"
