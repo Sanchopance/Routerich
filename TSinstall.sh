@@ -6,6 +6,18 @@ dir="/opt/torrserver"
 binary="${dir}/torrserver"
 init_script="/etc/init.d/torrserver"
 
+# --- Проверка и установка wget-ssl (поддержка HTTPS) ---
+if command -v opkg >/dev/null 2>&1; then
+    if ! opkg list-installed 2>/dev/null | grep -q "^wget-ssl"; then
+        echo "Устанавливаем wget-ssl для поддержки HTTPS..."
+        opkg update >/dev/null 2>&1
+        opkg install wget-ssl >/dev/null 2>&1
+        if ! command -v wget >/dev/null 2>&1 || ! wget --version 2>/dev/null | grep -qi ssl; then
+            echo "Предупреждение: не удалось установить wget-ssl. Загрузка может не работать."
+        fi
+    fi
+fi
+
 echo "Проверяем наличие TorrServer..."
 
 # Функция для установки TorrServer
